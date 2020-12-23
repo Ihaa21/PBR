@@ -1,13 +1,8 @@
 #pragma once
 
-#include "framework_vulkan\framework_vulkan.h"
+#define VALIDATION
 
-struct procedural_model
-{
-    u32 NumIndices;
-    VkBuffer Vertices;
-    VkBuffer Indices;
-};
+#include "framework_vulkan\framework_vulkan.h"
 
 //
 // NOTE: PBR 
@@ -32,9 +27,10 @@ struct model_skin
     VkDescriptorSet Descriptor;
 };
 
-struct prefiltered_env_inputs
+// TODO: Store num mips we do somewhere, hardcoded rn
+struct prefiltered_env_input
 {
-    v4 Roughness[5];
+    v4 Roughness;
 };
 
 //
@@ -45,12 +41,7 @@ struct global_cubemap_input_entry
 {
     m4 WVPTransform;
     i32 LayerId;
-    u32 Pad[3];
-};
-
-struct global_cubemap_inputs
-{
-    global_cubemap_input_entry Entries[6];
+    u32 Pad[15];
 };
 
 struct render_cubemap_inputs
@@ -76,9 +67,9 @@ struct demo_state
     render_target GeometryRenderTarget;
     
     // NOTE: Models
-    procedural_model Quad;
-    procedural_model Cube;
-    procedural_model Sphere;
+    procedural_mesh Quad;
+    procedural_mesh Cube;
+    procedural_mesh Sphere;
     
     // NOTE: Pbr Assets
     model_skin GoldSkin;

@@ -1,14 +1,14 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.30011.22
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.271
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "pbr_demo", "pbr_demo.exe", "{73677219-E623-4F8D-85C5-5753D842535D}"
 	ProjectSection(DebuggerProjectSystem) = preProject
 		PortSupplier = 00000000-0000-0000-0000-000000000000
-		Executable = C:\Code\Demos\PBR\build_win32\pbr_demo.exe
+		Executable = D:\Code\Demos\PBR\build_win32\pbr_demo.exe
 		RemoteMachine = MSDNDESKTOP-P0S
-		StartingDirectory = C:\Code\Demos\PBR\data
+		StartingDirectory = D:\Code\Demos\PBR\data
 		Environment = Default
 		LaunchingEngine = 00000000-0000-0000-0000-000000000000
 		UseLegacyDebugEngines = No

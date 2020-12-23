@@ -20,7 +20,8 @@ void main()
 {
     vec4 TransformedPos = InputBuffer.WVPTransform * vec4(InPos, 1);
     // NOTE: This sets the z to far z and fails depth test for everything else
-    gl_Position = TransformedPos.xyww;
+    gl_Position = vec4(TransformedPos.xy, 0, TransformedPos.w);
+    //gl_Position = TransformedPos.xyww;
     OutUvw = InPos;
 }
 

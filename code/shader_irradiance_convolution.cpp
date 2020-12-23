@@ -50,15 +50,15 @@ void main()
     */
 
     vec3 Irradiance = vec3(0);
-    vec3 Up = vec3(0, 1, 0);
-    vec3 Right = cross(Up, Normal);
+    vec3 Up = vec3(0, 1, 0); // TODO: If normal is exactly this value, we can run into a invalid pixel
+    vec3 Right = normalize(cross(Up, Normal));
     Up = cross(Normal, Right);
 
     float NumSamples = 0;
     float SampleDelta = 0.025;
     for (float Phi = 0; Phi < 2*Pi32; Phi += SampleDelta)
     {
-        for (float Theta = 0; Theta < Pi32*0.5; Theta += SampleDelta)
+        for (float Theta = 0.05; Theta < Pi32*0.5; Theta += SampleDelta)
         {
             // NOTE: Spherical to cartesian conversion
             vec3 SampleVec = vec3(sin(Theta)*cos(Phi), sin(Theta)*sin(Phi), cos(Theta));

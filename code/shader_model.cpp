@@ -183,7 +183,7 @@ void main()
         const float MaxReflectionLod = 4.0;
         vec3 PreFilteredColor = textureLod(PreFilteredEnvMap, ReflectionDir, SurfaceRoughness * MaxReflectionLod).rgb;
         vec2 EnvBrdf = texture(BrdfLut, vec2(max(dot(SurfaceNormal, View), 0), SurfaceRoughness)).rg;
-        vec3 Specular = PreFilteredColor * (Ks * EnvBrdf.x + EnvBrdf.y);
+        vec3 Specular = vec3(0.0f); //PreFilteredColor * (Ks * EnvBrdf.x + EnvBrdf.y);
         
         vec3 Ambient = (Kd * Diffuse + Specular) * SurfaceAo;
         Color += Ambient;
