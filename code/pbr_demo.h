@@ -37,13 +37,6 @@ struct prefiltered_env_input
 // NOTE: Cube Maps
 //
 
-struct global_cubemap_input_entry
-{
-    m4 WVPTransform;
-    i32 LayerId;
-    u32 Pad[15];
-};
-
 struct render_cubemap_inputs
 {
     m4 WVPTransform;
@@ -63,9 +56,10 @@ struct demo_state
 
     // NOTE: Render Target Entries
     render_target_entry SwapChainEntry;
+    VkImage DepthImage;
     render_target_entry DepthEntry;
     render_target GeometryRenderTarget;
-    
+
     // NOTE: Models
     procedural_mesh Quad;
     procedural_mesh Cube;
@@ -83,20 +77,13 @@ struct demo_state
     VkBuffer GlobalCubeMapData;
     VkDescriptorSet GlobalCubeMapDescriptor;
     VkDescriptorSetLayout GlobalCubeMapDescLayout;
-    VkRenderPass CubeMapRenderPass;
-    VkFramebuffer EnvironmentMapFbo;
-    VkFramebuffer IrradianceMapFbo;
     
     // NOTE: Equirectangular Map // TODO: Figure out how to free this stuff dynamically
     vk_image IrradianceRect;
     VkDescriptorSet IrradianceRectDescriptor; 
-
-    // NOTE: Cube Maps
-    vk_image EnvironmentMap;
-    vk_image IrradianceMap;
-    vk_image PreFilteredEnvMap;
-    VkImageView PreFilteredEnvViews[5];
-    VkFramebuffer PreFilteredEnvFbos[5];
+    VkImage EnvironmentMap;
+    render_target_entry EnvironmentMapEntry;
+    render_target EnvironmentTarget;
 
     // NOTE: Equirectangular to Cubemap Data
     VkDescriptorSetLayout EquirectangularToCubeMapDescLayout;
@@ -107,6 +94,9 @@ struct demo_state
     vk_pipeline* IrradianceConvolutionPipeline;
     // TODO: Currently global
     VkDescriptorSet IrradianceConvolutionDescriptor;
+    VkImage IrradianceMap;
+    render_target_entry IrradianceMapEntry;
+    render_target IrradianceTarget;
 
     // NOTE: Prefiltered Env Map
     VkDescriptorSetLayout PreFilteredEnvDescLayout;
@@ -114,8 +104,12 @@ struct demo_state
     // TODO: Currently global
     VkBuffer PreFilteredEnvBuffer;
     VkDescriptorSet PreFilteredEnvDescriptor;
+    vk_image PreFilteredEnvMap;
+    render_target_entry PreFilteredEnvEntries[5];
+    render_target PreFilteredEnvTargets[5];
 
     // NOTE: Integrated BRDF
+    VkImage IntegratedBrdf;
     render_target_entry IntegratedBrdfEntry;
     render_target IntegratedBrdfTarget;
     render_fullscreen_pass IntegratedBrdfPass;

@@ -3,7 +3,7 @@
 
   TODO: BUGS IN PBR:
 
-    - Reflection vectors for specular ibl seem wrong on one axis. They should be goin in the opposite direction. Maybe cube maps coords
+    - Reflection vectors for specular ibl seem wrong on one (y) axis. They should be goin in the opposite direction. Maybe cube maps coords
       aren't properly setup or something
 
     - There is a halo effect around spheres with irradiance. I think this is because the actual renderer uses different pbr functions for
@@ -11,8 +11,6 @@
 
     - Specular ibl doesn't take into account surface roughness correctly. There should be less reflections on rougher surfaces but this
       does not seem to happen. Everything is very reflective. Check if we are sampling the mip levels correctly.
-
-    - Sample count in pre filtered env map seems low, or better stated is that the results are very noisy. Try increasing sample count.
   
  */
 
@@ -44,7 +42,7 @@ inline model_skin DemoSetupPbrSkin(char* Color, char* Normal, char* Metallic, ch
 
     // TODO: These are hardcoded as globals right now
     VkDescriptorImageWrite(&RenderState->DescriptorManager, Result.Descriptor, 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                           DemoState->IrradianceMap.View, DemoState->AnisoSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                           DemoState->IrradianceMapEntry.View, DemoState->AnisoSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     VkDescriptorImageWrite(&RenderState->DescriptorManager, Result.Descriptor, 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                            DemoState->PreFilteredEnvMap.View, DemoState->AnisoSampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     VkDescriptorImageWrite(&RenderState->DescriptorManager, Result.Descriptor, 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -89,28 +87,6 @@ DEMO_INIT(Init)
             InitParams.DeviceExtensions = DeviceExtensions;
             VkInit(VulkanLib, hInstance, WindowHandle, &DemoState->Arena, &DemoState->TempArena, InitParams);
         }
-        
-        // NOTE: Init descriptor pool
-        {
-            VkDescriptorPoolSize Pools[5] = {};
-            Pools[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            Pools[0].descriptorCount = 1000;
-            Pools[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            Pools[1].descriptorCount = 1000;
-            Pools[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            Pools[2].descriptorCount = 1000;
-            Pools[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-            Pools[3].descriptorCount = 1000;
-            Pools[4].type = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
-            Pools[4].descriptorCount = 1000;
-            
-            VkDescriptorPoolCreateInfo CreateInfo = {};
-            CreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-            CreateInfo.maxSets = 1000;
-            CreateInfo.poolSizeCount = ArrayCount(Pools);
-            CreateInfo.pPoolSizes = Pools;
-            VkCheckResult(vkCreateDescriptorPool(RenderState->Device, &CreateInfo, 0, &RenderState->DescriptorPool));
-        }
     }
     
     // NOTE: Create samplers
@@ -124,10 +100,10 @@ DEMO_INIT(Init)
         
     // NOTE: Init render target entries
     DemoState->SwapChainEntry = RenderTargetSwapChainEntryCreate(RenderState->WindowWidth, RenderState->WindowHeight,
-                                                               RenderState->SwapChainFormat);
-    DemoState->DepthEntry = RenderTargetEntryCreate(&RenderState->GpuArena, RenderState->WindowWidth, RenderState->WindowHeight,
-                                                  VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                                  VK_IMAGE_ASPECT_DEPTH_BIT);
+                                                                 RenderState->SwapChainFormat);
+    RenderTargetEntryCreate(&RenderState->GpuArena, RenderState->WindowWidth, RenderState->WindowHeight, VK_FORMAT_D32_SFLOAT,
+                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, &DemoState->DepthImage,
+                            &DemoState->DepthEntry);
 
     // NOTE: Geometry RT
     {
@@ -153,69 +129,66 @@ DEMO_INIT(Init)
         DemoState->GeometryRenderTarget = RenderTargetBuilderEnd(&Builder, VkRenderPassBuilderEnd(&RpBuilder, RenderState->Device));
     }
     
-    // NOTE: Environment Map Render Target // TODO: Make render target support for this
+    // NOTE: Environment Map Render Target
     {
         // NOTE: Create render pass
-        {
-            vk_render_pass_builder RpBuilder = VkRenderPassBuilderBegin(&DemoState->TempArena);
+        vk_render_pass_builder RpBuilder = VkRenderPassBuilderBegin(&DemoState->TempArena);
 
-            u32 ColorId = VkRenderPassAttachmentAdd(&RpBuilder, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                                    VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_UNDEFINED,
-                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        u32 ColorId = VkRenderPassAttachmentAdd(&RpBuilder, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                                VK_ATTACHMENT_STORE_OP_STORE, VK_IMAGE_LAYOUT_UNDEFINED,
+                                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            VkRenderPassSubPassBegin(&RpBuilder, VK_PIPELINE_BIND_POINT_GRAPHICS);
-            VkRenderPassColorRefAdd(&RpBuilder, ColorId, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-            VkRenderPassSubPassEnd(&RpBuilder);
+        VkRenderPassSubPassBegin(&RpBuilder, VK_PIPELINE_BIND_POINT_GRAPHICS);
+        VkRenderPassColorRefAdd(&RpBuilder, ColorId, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        VkRenderPassSubPassEnd(&RpBuilder);
 
-            DemoState->CubeMapRenderPass = VkRenderPassBuilderEnd(&RpBuilder, RenderState->Device);
-        }
+        VkRenderPass CubeMapRenderPass = VkRenderPassBuilderEnd(&RpBuilder, RenderState->Device);
 
         u32 FaceResX = 512;
         u32 FaceResY = 512;
-        DemoState->EnvironmentMap = VkCubeMapCreate(RenderState->Device, &RenderState->GpuArena, FaceResX, FaceResY, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-        DemoState->EnvironmentMapFbo = VkFboCreate(RenderState->Device, DemoState->CubeMapRenderPass,
-                                                   &DemoState->EnvironmentMap.View, 1, FaceResX, FaceResY);
-        DemoState->IrradianceMap = VkCubeMapCreate(RenderState->Device, &RenderState->GpuArena, FaceResX, FaceResY, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
-        DemoState->IrradianceMapFbo = VkFboCreate(RenderState->Device, DemoState->CubeMapRenderPass,
-                                                  &DemoState->IrradianceMap.View, 1, FaceResX, FaceResY);
 
-        DemoState->PreFilteredEnvMap = VkCubeMapCreate(RenderState->Device, &RenderState->GpuArena, FaceResX, FaceResY, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                       VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 5);
-        for (u32 MipId = 0; MipId < 5; ++MipId)
+        // NOTE: Environment Map Target
         {
-            u32 NewResX = FaceResX / u32(Pow(2.0f, f32(MipId)));
-            u32 NewResY = FaceResY / u32(Pow(2.0f, f32(MipId)));
-            
-            VkImageViewCreateInfo ImgViewCreateInfo = {};
-            ImgViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            ImgViewCreateInfo.image = DemoState->PreFilteredEnvMap.Image;
-            ImgViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-            ImgViewCreateInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-            ImgViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            ImgViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            ImgViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            ImgViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            ImgViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            ImgViewCreateInfo.subresourceRange.baseMipLevel = MipId;
-            ImgViewCreateInfo.subresourceRange.levelCount = 1;
-            ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-            ImgViewCreateInfo.subresourceRange.layerCount = 6;
-            VkCheckResult(vkCreateImageView(RenderState->Device, &ImgViewCreateInfo, 0, DemoState->PreFilteredEnvViews + MipId));
-        
-            DemoState->PreFilteredEnvFbos[MipId] = VkFboCreate(RenderState->Device, DemoState->CubeMapRenderPass,
-                                                               DemoState->PreFilteredEnvViews + MipId, 1, NewResX, NewResY);            
-        }
-    }
+            RenderTargetCubeEntryCreate(&RenderState->GpuArena, FaceResX, FaceResY, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+                                        &DemoState->EnvironmentMap, &DemoState->EnvironmentMapEntry);
 
-    //
-    // NOTE: Global Cube Map Data // TODO: Move to render
-    //
-    {
-        vk_descriptor_layout_builder Builder = VkDescriptorLayoutBegin(&DemoState->GlobalCubeMapDescLayout);
-        VkDescriptorLayoutAdd(&Builder, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
-        VkDescriptorLayoutEnd(RenderState->Device, &Builder);
+            render_target_builder Builder = RenderTargetBuilderBegin(&DemoState->Arena, &DemoState->TempArena, FaceResX, FaceResY);
+            RenderTargetAddTarget(&Builder, &DemoState->EnvironmentMapEntry, VkClearColorCreate(0, 0, 0, 1));
+            DemoState->EnvironmentTarget = RenderTargetBuilderEnd(&Builder, CubeMapRenderPass);
+        }
+
+        // NOTE: Irradiance Map Target
+        {
+            RenderTargetCubeEntryCreate(&RenderState->GpuArena, FaceResX, FaceResY, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+                                        &DemoState->IrradianceMap, &DemoState->IrradianceMapEntry);
+
+            render_target_builder Builder = RenderTargetBuilderBegin(&DemoState->Arena, &DemoState->TempArena, FaceResX, FaceResY);
+            RenderTargetAddTarget(&Builder, &DemoState->IrradianceMapEntry, VkClearColorCreate(0, 0, 0, 1));
+            DemoState->IrradianceTarget = RenderTargetBuilderEnd(&Builder, CubeMapRenderPass);
+        }
+
+        // NOTE: PreFiltered Environment Map Target
+        {
+            VkFormat Format = VK_FORMAT_R16G16B16A16_SFLOAT;
+            DemoState->PreFilteredEnvMap = VkCubeMapCreate(RenderState->Device, &RenderState->GpuArena, FaceResX, FaceResY, Format,
+                                                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT, 5);
+        
+            for (u32 MipId = 0; MipId < ArrayCount(DemoState->PreFilteredEnvEntries); ++MipId)
+            {
+                u32 NewResX = FaceResX / u32(Pow(2.0f, f32(MipId)));
+                u32 NewResY = FaceResY / u32(Pow(2.0f, f32(MipId)));
+            
+                VkImageView View = VkImageViewCreate(RenderState->Device, DemoState->PreFilteredEnvMap.Image, VK_IMAGE_VIEW_TYPE_CUBE,
+                                                     Format, VK_IMAGE_ASPECT_COLOR_BIT, MipId, 6);
+                DemoState->PreFilteredEnvEntries[MipId] = RenderTargetCubeEntryCreate(NewResX, NewResY, Format, View);
+
+                render_target_builder Builder = RenderTargetBuilderBegin(&DemoState->Arena, &DemoState->TempArena, NewResX, NewResY);
+                RenderTargetAddTarget(&Builder, DemoState->PreFilteredEnvEntries + MipId, VkClearColorCreate(0, 0, 0, 1));
+                DemoState->PreFilteredEnvTargets[MipId] = RenderTargetBuilderEnd(&Builder, CubeMapRenderPass);
+            }
+        }
     }
 
     //
@@ -251,12 +224,11 @@ DEMO_INIT(Init)
 
             VkDescriptorSetLayout Layouts[] =
             {
-                DemoState->GlobalCubeMapDescLayout,
+                RenderState->GlobalCubeMapDescLayout,
                 DemoState->EquirectangularToCubeMapDescLayout,
             };
             DemoState->EquirectangularToCubeMapPipeline = VkPipelineBuilderEnd(&Builder, RenderState->Device, &RenderState->PipelineManager,
-                                                                               DemoState->CubeMapRenderPass, 0,
-                                                                               Layouts, ArrayCount(Layouts));
+                                                                               DemoState->EnvironmentTarget.RenderPass, 0, Layouts, ArrayCount(Layouts));
         }        
     }
     
@@ -305,7 +277,7 @@ DEMO_INIT(Init)
         VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->RenderCubeMapDescriptor, 0,
                                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, DemoState->RenderCubeMapInputs);
         VkDescriptorImageWrite(&RenderState->DescriptorManager, DemoState->RenderCubeMapDescriptor, 1,
-                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMap.View, DemoState->AnisoSampler,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMapEntry.View, DemoState->AnisoSampler,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
@@ -422,17 +394,17 @@ DEMO_INIT(Init)
 
             VkDescriptorSetLayout Layouts[] =
             {
-                DemoState->GlobalCubeMapDescLayout,
+                RenderState->GlobalCubeMapDescLayout,
                 DemoState->IrradianceConvolutionDescLayout,
             };
             DemoState->IrradianceConvolutionPipeline = VkPipelineBuilderEnd(&Builder, RenderState->Device, &RenderState->PipelineManager,
-                                                                            DemoState->CubeMapRenderPass, 0, Layouts, ArrayCount(Layouts));
+                                                                            DemoState->IrradianceTarget.RenderPass, 0, Layouts, ArrayCount(Layouts));
         }
 
         // TODO: Currently this is global so we setup the descriptor data here
         DemoState->IrradianceConvolutionDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, DemoState->IrradianceConvolutionDescLayout);
         VkDescriptorImageWrite(&RenderState->DescriptorManager, DemoState->IrradianceConvolutionDescriptor, 0,
-                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMap.View, DemoState->AnisoSampler,
+                               VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMapEntry.View, DemoState->AnisoSampler,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
@@ -470,11 +442,12 @@ DEMO_INIT(Init)
 
             VkDescriptorSetLayout Layouts[] =
                 {
-                    DemoState->GlobalCubeMapDescLayout,
+                    RenderState->GlobalCubeMapDescLayout,
                     DemoState->PreFilteredEnvDescLayout,
                 };
             DemoState->PreFilteredEnvPipeline = VkPipelineBuilderEnd(&Builder, RenderState->Device, &RenderState->PipelineManager,
-                                                                     DemoState->CubeMapRenderPass, 0, Layouts, ArrayCount(Layouts));
+                                                                     DemoState->PreFilteredEnvTargets[0].RenderPass, 0, Layouts,
+                                                                     ArrayCount(Layouts));
         }
     }
 
@@ -482,9 +455,9 @@ DEMO_INIT(Init)
     // NOTE: Create Integrated BRDF Data
     //
     {
-        DemoState->IntegratedBrdfEntry = RenderTargetEntryCreate(&RenderState->GpuArena, 512, 512, VK_FORMAT_R32G32_SFLOAT,
-                                                                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                                                 VK_IMAGE_ASPECT_COLOR_BIT);
+        RenderTargetEntryCreate(&RenderState->GpuArena, 512, 512, VK_FORMAT_R32G32_SFLOAT,
+                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+                                &DemoState->IntegratedBrdf, &DemoState->IntegratedBrdfEntry);
 
         // NOTE: Integrated Brdf RT
         {
@@ -516,41 +489,6 @@ DEMO_INIT(Init)
         DemoState->Quad = AssetsPushQuad();
         DemoState->Cube = AssetsPushCube();
         DemoState->Sphere = AssetsPushSphere(64, 64);
-
-        // NOTE: Push global cube map data
-        {
-            u32 EntrySize = u32(Max(RenderState->DeviceLimits.minUniformBufferOffsetAlignment, sizeof(global_cubemap_input_entry)));
-            DemoState->GlobalCubeMapData = VkBufferCreate(RenderState->Device, &RenderState->GpuArena,
-                                                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                                          EntrySize*6);
-            u8* Data = VkTransferPushWrite(&RenderState->TransferManager, DemoState->GlobalCubeMapData, EntrySize*6,
-                                           BarrierMask(VkAccessFlagBits(0), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT),
-                                           BarrierMask(VK_ACCESS_UNIFORM_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT));
-
-            m4 PerspectiveTransform = VkPerspProjM4(1.0f, DegreeToRadians(90.0f), 0.1f, 10.0f);
-            m4 Transforms[6] =
-            {
-                PerspectiveTransform * LookAtM4(V3(-1, 0, 0), V3(0, 1, 0), V3(0, 0, 0)), // NOTE: Left
-                PerspectiveTransform * LookAtM4(V3(1, 0, 0), V3(0, 1, 0), V3(0, 0, 0)), // NOTE: Right
-                PerspectiveTransform * LookAtM4(V3(0, 1, 0), V3(0, 0, -1), V3(0, 0, 0)), // NOTE: Top
-                PerspectiveTransform * LookAtM4(V3(0, -1, 0), V3(0, 0, 1), V3(0, 0, 0)), // NOTE: Bottom
-                PerspectiveTransform * LookAtM4(V3(0, 0, 1), V3(0, 1, 0), V3(0, 0, 0)), // NOTE: Front
-                PerspectiveTransform * LookAtM4(V3(0, 0, -1), V3(0, 1, 0), V3(0, 0, 0)), // NOTE: Back
-            };
-
-            for (u32 FaceId = 0; FaceId < 6; ++FaceId)
-            {
-                global_cubemap_input_entry* Inputs = (global_cubemap_input_entry*)Data;
-                Inputs->WVPTransform = Transforms[FaceId];
-                Inputs->LayerId = FaceId;
-
-                Data += EntrySize;
-            }
-            
-            DemoState->GlobalCubeMapDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, DemoState->GlobalCubeMapDescLayout);
-            VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->GlobalCubeMapDescriptor, 0,
-                                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, DemoState->GlobalCubeMapData);
-        }
         
         // NOTE: Push pbr data
         {
@@ -605,7 +543,7 @@ DEMO_INIT(Init)
             // TODO: Currently this is global so we setup teh descriptor data here
             DemoState->PreFilteredEnvDescriptor = VkDescriptorSetAllocate(RenderState->Device, RenderState->DescriptorPool, DemoState->PreFilteredEnvDescLayout);
             VkDescriptorImageWrite(&RenderState->DescriptorManager, DemoState->PreFilteredEnvDescriptor, 0,
-                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMap.View, DemoState->AnisoSampler,
+                                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, DemoState->EnvironmentMapEntry.View, DemoState->AnisoSampler,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             VkDescriptorBufferWrite(&RenderState->DescriptorManager, DemoState->PreFilteredEnvDescriptor, 1,
                                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, DemoState->PreFilteredEnvBuffer);
@@ -616,36 +554,9 @@ DEMO_INIT(Init)
     }
     
     // NOTE: Generate environment map
+    RenderTargetPassBegin(&DemoState->EnvironmentTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
     {
-        u32 FaceResX = 512;
-        u32 FaceResY = 512;
-
-        VkClearValue ClearValues = VkClearColorCreate(0, 0, 0, 1);
-        
-        VkRenderPassBeginInfo BeginInfo = {};
-        BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        BeginInfo.renderPass = DemoState->CubeMapRenderPass;
-        BeginInfo.framebuffer = DemoState->EnvironmentMapFbo;
-        BeginInfo.renderArea.offset = { 0, 0 };
-        BeginInfo.renderArea.extent = { FaceResX, FaceResY };
-        BeginInfo.clearValueCount = 1;
-        BeginInfo.pClearValues = &ClearValues;
-        vkCmdBeginRenderPass(Commands.Buffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport ViewPort = {};
-        ViewPort.x = 0;
-        ViewPort.y = 0;
-        ViewPort.width = f32(FaceResX);
-        ViewPort.height = f32(FaceResY);
-        // TODO: How do we want to handle min/max depth?
-        ViewPort.minDepth = 0.0f;
-        ViewPort.maxDepth = 1.0f;
-        vkCmdSetViewport(Commands.Buffer, 0, 1, &ViewPort);
-    
-        VkRect2D Scissor = {};
-        Scissor.offset = {};
-        Scissor.extent = { FaceResX, FaceResY };
-        vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
+        vkCmdBindPipeline(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->EquirectangularToCubeMapPipeline->Handle);
 
         // NOTE: Render to each face
         VkDeviceSize Offset = 0;
@@ -653,55 +564,22 @@ DEMO_INIT(Init)
         vkCmdBindIndexBuffer(Commands.Buffer, DemoState->Cube.Indices, 0, VK_INDEX_TYPE_UINT32);
         for (u32 FaceId = 0; FaceId < 6; ++FaceId)
         {
-            vkCmdBindPipeline(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->EquirectangularToCubeMapPipeline->Handle);
-
             u32 BufferOffsets = u32(Max(RenderState->DeviceLimits.minUniformBufferOffsetAlignment, sizeof(global_cubemap_input_entry))*FaceId);
             VkDescriptorSet DescriptorSets[] =
-            {
-                DemoState->GlobalCubeMapDescriptor,
-                DemoState->IrradianceRectDescriptor,
-            };
+                {
+                    RenderState->GlobalCubeMapDescriptor,
+                    DemoState->IrradianceRectDescriptor,
+                };
             vkCmdBindDescriptorSets(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->EquirectangularToCubeMapPipeline->Layout,
                                     0, ArrayCount(DescriptorSets), DescriptorSets, 1, &BufferOffsets);
-
             vkCmdDrawIndexed(Commands.Buffer, DemoState->Cube.NumIndices, 1, 0, 0, 0);
         }
-        
-        vkCmdEndRenderPass(Commands.Buffer);
     }
+    RenderTargetPassEnd(Commands);
     
     // NOTE: Generate irradiance map
+    RenderTargetPassBegin(&DemoState->IrradianceTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
     {
-        u32 FaceResX = 512;
-        u32 FaceResY = 512;
-
-        VkClearValue ClearValues = VkClearColorCreate(0, 0, 0, 1);
-        
-        VkRenderPassBeginInfo BeginInfo = {};
-        BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        BeginInfo.renderPass = DemoState->CubeMapRenderPass;
-        BeginInfo.framebuffer = DemoState->IrradianceMapFbo;
-        BeginInfo.renderArea.offset = { 0, 0 };
-        BeginInfo.renderArea.extent = { FaceResX, FaceResY };
-        BeginInfo.clearValueCount = 1;
-        BeginInfo.pClearValues = &ClearValues;
-        vkCmdBeginRenderPass(Commands.Buffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport ViewPort = {};
-        ViewPort.x = 0;
-        ViewPort.y = 0;
-        ViewPort.width = f32(FaceResX);
-        ViewPort.height = f32(FaceResY);
-        // TODO: How do we want to handle min/max depth?
-        ViewPort.minDepth = 0.0f;
-        ViewPort.maxDepth = 1.0f;
-        vkCmdSetViewport(Commands.Buffer, 0, 1, &ViewPort);
-    
-        VkRect2D Scissor = {};
-        Scissor.offset = {};
-        Scissor.extent = { FaceResX, FaceResY };
-        vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
-
         // NOTE: Render to each face
         VkDeviceSize Offset = 0;
         vkCmdBindVertexBuffers(Commands.Buffer, 0, 1, &DemoState->Cube.Vertices, &Offset);
@@ -713,7 +591,7 @@ DEMO_INIT(Init)
             u32 BufferOffsets = u32(Max(RenderState->DeviceLimits.minUniformBufferOffsetAlignment, sizeof(global_cubemap_input_entry))*FaceId);
             VkDescriptorSet DescriptorSets[] =
             {
-                DemoState->GlobalCubeMapDescriptor,
+                RenderState->GlobalCubeMapDescriptor,
                 DemoState->IrradianceConvolutionDescriptor,
             };
             vkCmdBindDescriptorSets(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->IrradianceConvolutionPipeline->Layout,
@@ -721,42 +599,13 @@ DEMO_INIT(Init)
 
             vkCmdDrawIndexed(Commands.Buffer, DemoState->Cube.NumIndices, 1, 0, 0, 0);
         }
-        
-        vkCmdEndRenderPass(Commands.Buffer);
     }
+    RenderTargetPassEnd(Commands);
         
     // NOTE: Generate prefiltered env map
     for (u32 MipId = 0; MipId < 5; ++MipId)
     {
-        u32 FaceResX = 512 / u32(Pow(2.0f, f32(MipId)));
-        u32 FaceResY = 512 / u32(Pow(2.0f, f32(MipId)));
-
-        VkClearValue ClearValues = VkClearColorCreate(0, 0, 0, 1);
-        
-        VkRenderPassBeginInfo BeginInfo = {};
-        BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        BeginInfo.renderPass = DemoState->CubeMapRenderPass;
-        BeginInfo.framebuffer = DemoState->PreFilteredEnvFbos[MipId];
-        BeginInfo.renderArea.offset = { 0, 0 };
-        BeginInfo.renderArea.extent = { FaceResX, FaceResY };
-        BeginInfo.clearValueCount = 1;
-        BeginInfo.pClearValues = &ClearValues;
-        vkCmdBeginRenderPass(Commands.Buffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport ViewPort = {};
-        ViewPort.x = 0;
-        ViewPort.y = 0;
-        ViewPort.width = f32(FaceResX);
-        ViewPort.height = f32(FaceResY);
-        // TODO: How do we want to handle min/max depth?
-        ViewPort.minDepth = 0.0f;
-        ViewPort.maxDepth = 1.0f;
-        vkCmdSetViewport(Commands.Buffer, 0, 1, &ViewPort);
-    
-        VkRect2D Scissor = {};
-        Scissor.offset = {};
-        Scissor.extent = { FaceResX, FaceResY };
-        vkCmdSetScissor(Commands.Buffer, 0, 1, &Scissor);
+        RenderTargetPassBegin(&DemoState->PreFilteredEnvTargets[MipId], Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
 
         // NOTE: Render to each face
         VkDeviceSize Offset = 0;
@@ -773,7 +622,7 @@ DEMO_INIT(Init)
                 };
             VkDescriptorSet DescriptorSets[] =
                 {
-                    DemoState->GlobalCubeMapDescriptor,
+                    RenderState->GlobalCubeMapDescriptor,
                     DemoState->PreFilteredEnvDescriptor,
                 };
             vkCmdBindDescriptorSets(Commands.Buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, DemoState->PreFilteredEnvPipeline->Layout,
@@ -782,7 +631,7 @@ DEMO_INIT(Init)
             vkCmdDrawIndexed(Commands.Buffer, DemoState->Cube.NumIndices, 1, 0, 0, 0);
         }
         
-        vkCmdEndRenderPass(Commands.Buffer);
+        RenderTargetPassEnd(Commands);
     }
 
     // NOTE: Compute Integrated BRDF
@@ -874,7 +723,7 @@ DEMO_MAIN_LOOP(MainLoop)
         VkTransferManagerFlush(&RenderState->TransferManager, RenderState->Device, RenderState->Commands.Buffer, &RenderState->BarrierManager);
     }
 
-    RenderTargetRenderPassBegin(&DemoState->GeometryRenderTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
+    RenderTargetPassBegin(&DemoState->GeometryRenderTarget, Commands, RenderTargetRenderPass_SetViewPort | RenderTargetRenderPass_SetScissor);
     
     // NOTE: Draw PBR Textures
     {
@@ -905,7 +754,7 @@ DEMO_MAIN_LOOP(MainLoop)
         vkCmdDrawIndexed(Commands.Buffer, DemoState->Cube.NumIndices, DemoState->NumInstances, 0, 0, 0);
     }
     
-    RenderTargetRenderPassEnd(Commands);        
+    RenderTargetPassEnd(Commands);        
     VkCheckResult(vkEndCommandBuffer(Commands.Buffer));
                     
     // NOTE: Render to our window surface

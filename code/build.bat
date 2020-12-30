@@ -23,7 +23,7 @@ pushd %OutputDir%
 del *.pdb > NUL 2> NUL
 
 REM USING GLSL IN VK USING GLSLANGVALIDATOR
-call glslangValidator -DVERTEX_SHADER=1 -S vert -e main -g -V -o %DataDir%\shader_cubemap_vert.spv %CodeDir%\shader_cubemap_vs.cpp
+copy %LibsDir%\framework_vulkan\shader_cubemap_vert.spv %DataDir%\shader_cubemap_vert.spv 
 call glslangValidator -DFRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_equirectangular_to_cubemap_frag.spv %CodeDir%\shader_equirectangular_to_cubemap.cpp
 call glslangValidator -DFRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_irradiance_convolution_frag.spv %CodeDir%\shader_irradiance_convolution.cpp
 call glslangValidator -DFRAGMENT_SHADER=1 -S frag -e main -g -V -o %DataDir%\shader_prefiltered_env_map_frag.spv %CodeDir%\shader_prefiltered_env_map.cpp

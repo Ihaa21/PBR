@@ -2,6 +2,7 @@
 /*
 
   https://learnopengl.com/PBR/Lighting
+  https://www.youtube.com/watch?v=j-A0mwsJRmk&ab_channel=ACMSIGGRAPH
 
   NOTE: Definitions:
 
